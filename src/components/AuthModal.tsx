@@ -30,6 +30,11 @@ export default function AuthModal({
   const [city, setCity] = useState('Pretoria');
   const [province, setProvince] = useState('Gauteng');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'client' | 'plumber'>('client');
+  const [subscriptionPlan, setSubscriptionPlan] = useState<'monthly' | 'yearly'>('monthly');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
   
   // Forgot Password States
   const [resetEmail, setResetEmail] = useState('');
@@ -150,6 +155,26 @@ export default function AuthModal({
       return;
     }
 
+    // Secure/Simulated Validation for Plumber subscriptions
+    if (role === 'plumber') {
+      const cleanCard = cardNumber.replace(/\s/g, '');
+      if (cleanCard.length < 13 || cleanCard.length > 19 || !/^\d+$/.test(cleanCard)) {
+        setError('Please enter a valid credit/debit card number');
+        return;
+      }
+
+      if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(cardExpiry)) {
+        setError('Please enter a valid expiry date in MM/YY format');
+        return;
+      }
+
+      const cleanCvv = cardCvv.trim();
+      if (cleanCvv.length < 3 || cleanCvv.length > 4 || !/^\d+$/.test(cleanCvv)) {
+        setError('Please enter a valid 3 or 4 digit card CVV');
+        return;
+      }
+    }
+
     try {
       // Check if email already exists in Firestore or local
       const existingFirestoreUser = await getUserProfileByEmail(email);
@@ -173,6 +198,13 @@ export default function AuthModal({
         city: city.trim(),
         province,
         isPretoriaGauteng,
+        role,
+        ...(role === 'plumber' ? {
+          subscriptionPlan,
+          subscriptionStatus: 'active'
+        } : {
+          role: 'client'
+        })
       };
 
       // Save to Firestore & local storage
@@ -445,7 +477,90 @@ export default function AuthModal({
             /* REGISTER FORM */
             <form onSubmit={handleRegisterSubmit} className="space-y-4">
               <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider border-b border-red-100 pb-1 mb-2">
-                1. Account & Contact Details
+                1. Account Type Selection
+              </h4>
+
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div 
+                  onClick={() => setRole('client')}
+                  className={`p-3.5 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
+                    role === 'client' 
+                      ? 'border-red-600 bg-red-50/20 shadow-sm' 
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div>
+                    <span className="font-bold text-sm text-slate-900 block">Client Account</span>
+                    <span className="text-[11px] text-slate-500 mt-1 block leading-normal">
+                      For individuals & properties needing rapid emergency dispatch.
+                    </span>
+                  </div>
+                  <span className="text-emerald-600 font-mono text-[10px] font-black mt-3 block uppercase tracking-wider">
+                    FREE REGISTRATION
+                  </span>
+                </div>
+
+                <div 
+                  onClick={() => setRole('plumber')}
+                  className={`p-3.5 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
+                    role === 'plumber' 
+                      ? 'border-red-600 bg-red-50/20 shadow-sm' 
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div>
+                    <span className="font-bold text-sm text-slate-900 block">Plumber Account</span>
+                    <span className="text-[11px] text-slate-500 mt-1 block leading-normal">
+                      For official Pretoria plumbers looking to receive jobs.
+                    </span>
+                  </div>
+                  <span className="text-red-600 font-mono text-[10px] font-black mt-3 block uppercase tracking-wider">
+                    PAID SUBSCRIPTION
+                  </span>
+                </div>
+              </div>
+
+              {role === 'plumber' && (
+                <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-3 animate-fade-in">
+                  <span className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Select Plumber Subscription Plan
+                  </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div
+                      onClick={() => setSubscriptionPlan('monthly')}
+                      className={`p-3 rounded-xl border-2 cursor-pointer transition text-center ${
+                        subscriptionPlan === 'monthly'
+                          ? 'border-red-600 bg-white text-red-600 font-bold'
+                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-600'
+                      }`}
+                    >
+                      <span className="block text-[10px] uppercase tracking-wider font-semibold">Monthly Plan</span>
+                      <span className="block text-base font-black font-mono mt-1">R50<span className="text-xs font-normal"> / mo</span></span>
+                    </div>
+
+                    <div
+                      onClick={() => setSubscriptionPlan('yearly')}
+                      className={`p-3 rounded-xl border-2 cursor-pointer transition text-center relative ${
+                        subscriptionPlan === 'yearly'
+                          ? 'border-red-600 bg-white text-red-600 font-bold'
+                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-600'
+                      }`}
+                    >
+                      <span className="absolute -top-2.5 right-2 px-1.5 py-0.5 bg-red-600 text-[8px] text-white font-black rounded-full uppercase tracking-wider">
+                        Save R200!
+                      </span>
+                      <span className="block text-[10px] uppercase tracking-wider font-semibold">Yearly Plan</span>
+                      <span className="block text-base font-black font-mono mt-1">R400<span className="text-xs font-normal"> / yr</span></span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 text-center italic">
+                    Plumbers must maintain an active subscription to view available nearby emergency tickets.
+                  </p>
+                </div>
+              )}
+
+              <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider border-b border-red-100 pb-1 mb-2 pt-2">
+                2. Account & Contact Details
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -519,7 +634,7 @@ export default function AuthModal({
               </div>
 
               <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider border-b border-red-100 pb-1 pt-2 mb-2">
-                2. Emergency Dispatch Address
+                3. Emergency Dispatch Address
               </h4>
 
               <div>
@@ -589,6 +704,94 @@ export default function AuthModal({
                   ))}
                 </select>
               </div>
+
+              {role === 'plumber' && (
+                <div className="space-y-4 animate-fade-in">
+                  <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider border-b border-red-100 pb-1 pt-2 mb-2">
+                    4. Secure Subscription Billing
+                  </h4>
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-500 pb-2 border-b border-slate-200/60 font-mono">
+                      <span>Plan Total Due Now:</span>
+                      <strong className="text-slate-900 text-sm">
+                        {subscriptionPlan === 'monthly' ? 'R50.00 / month' : 'R400.00 / year'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                        Credit / Debit Card Number
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="4000 1234 5678 9010"
+                        maxLength={19}
+                        value={cardNumber}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          const matches = val.match(/\d{4,16}/g);
+                          const match = (matches && matches[0]) || '';
+                          const parts = [];
+
+                          for (let i = 0, len = match.length; i < len; i += 4) {
+                            parts.push(match.substring(i, i + 4));
+                          }
+
+                          if (parts.length > 0) {
+                            setCardNumber(parts.join(' '));
+                          } else {
+                            setCardNumber(val);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-red-500 font-mono"
+                        required={role === 'plumber'}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                          Expiry Date
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="MM/YY"
+                          maxLength={5}
+                          value={cardExpiry}
+                          onChange={(e) => {
+                            let val = e.target.value.replace(/\D/g, '');
+                            if (val.length > 2) {
+                              val = val.substring(0, 2) + '/' + val.substring(2, 4);
+                            }
+                            setCardExpiry(val);
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-red-500 font-mono"
+                          required={role === 'plumber'}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                          CVV Security Code
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="123"
+                          maxLength={4}
+                          value={cardCvv}
+                          onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, ''))}
+                          className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-red-500 font-mono"
+                          required={role === 'plumber'}
+                        />
+                      </div>
+                    </div>
+
+                    <p className="text-[9px] text-slate-400 text-center leading-normal">
+                      🔒 Secured via 256-bit encrypted simulated gate. Payments are processed immediately to grant instant responding status.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* DYNAMIC SURCHARGE WARNING / PREVIEW */}
               <AnimatePresence mode="wait">

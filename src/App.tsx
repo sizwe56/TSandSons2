@@ -610,10 +610,10 @@ export default function App() {
                     </form>
                   ) : (
                     /* Static details display */
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-xs sm:text-sm">
+                    <div className={`grid grid-cols-1 ${currentUser.role === 'plumber' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-6 text-xs sm:text-sm`}>
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                          Resident Name & Contact
+                          {currentUser.role === 'plumber' ? 'Plumber Name & Contact' : 'Resident Name & Contact'}
                         </span>
                         <strong className="text-slate-800 font-display block">{currentUser.fullName}</strong>
                         <span className="text-slate-500 mt-0.5 block">{currentUser.phone}</span>
@@ -654,6 +654,26 @@ export default function App() {
                             : 'Surcharge of R3,000 added dynamically.'}
                         </span>
                       </div>
+
+                      {currentUser.role === 'plumber' && (
+                        <div className="bg-red-50/30 p-3 rounded-xl border border-red-200/40 flex flex-col justify-between">
+                          <div>
+                            <span className="text-[10px] font-bold text-red-700 uppercase tracking-wider block mb-0.5">
+                              Plumber Subscription
+                            </span>
+                            <span className="text-slate-800 font-bold block capitalize">
+                              {currentUser.subscriptionPlan} Plan (R{currentUser.subscriptionPlan === 'yearly' ? '400.00 / yr' : '50.00 / mo'})
+                            </span>
+                            <span className="text-emerald-700 font-semibold text-[11px] flex items-center mt-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5 animate-ping" />
+                              <span>Status: Active</span>
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-1 block">
+                            Next renews: {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </motion.div>

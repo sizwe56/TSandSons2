@@ -8,6 +8,9 @@ export interface User {
   city: string;
   province: string;
   isPretoriaGauteng: boolean; // True if city is Pretoria and province is Gauteng
+  role?: 'client' | 'plumber';
+  subscriptionPlan?: 'monthly' | 'yearly';
+  subscriptionStatus?: 'active' | 'inactive';
 }
 
 export interface JobCategory {

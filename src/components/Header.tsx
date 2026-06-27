@@ -68,7 +68,16 @@ export default function Header({
                 className="flex items-center space-x-2 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition text-sm font-medium"
               >
                 <UserIcon className="h-4 w-4 text-slate-500" />
-                <span className="max-w-[100px] truncate">{currentUser.fullName.split(' ')[0]}</span>
+                <span className="max-w-[100px] truncate mr-1">{currentUser.fullName.split(' ')[0]}</span>
+                {currentUser.role === 'plumber' ? (
+                  <span className="bg-red-100 text-red-700 text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide leading-none shrink-0">
+                    Plumber
+                  </span>
+                ) : (
+                  <span className="bg-slate-100 text-slate-600 text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide leading-none shrink-0">
+                    Client
+                  </span>
+                )}
               </button>
 
               {/* Logout Button */}
