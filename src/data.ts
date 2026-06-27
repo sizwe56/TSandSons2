@@ -1,4 +1,6 @@
 import { JobCategory } from './types';
+// @ts-ignore
+import blockedToiletPlumber from './assets/images/blocked_toilet_plumber_1782564681479.jpg';
 
 export const PLUMBING_CATEGORIES: JobCategory[] = [
   {
@@ -31,7 +33,7 @@ export const PLUMBING_CATEGORIES: JobCategory[] = [
     id: 'blocked-toilets',
     title: 'Blocked Toilets',
     description: 'High-priority emergency clearance of obstructed toilets. We restore full flushing and drainage to prevent overflow and sanitary hazards.',
-    imageUrl: 'https://images.unsplash.com/photo-1585909693684-0e53b4142701?auto=format&fit=crop&q=80&w=800',
+    imageUrl: blockedToiletPlumber,
     iconName: 'Toilet',
     typicalIssues: [
       'Toilet bowl filling with water and about to overflow',
