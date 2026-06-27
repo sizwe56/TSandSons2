@@ -1,6 +1,12 @@
 import { JobCategory } from './types';
 // @ts-ignore
 import blockedToiletPlumber from './assets/images/blocked_toilet_plumber_1782564681479.jpg';
+// @ts-ignore
+import blockedSinkPlumber from './assets/images/blocked_sink_plumber_1782565470586.jpg';
+// @ts-ignore
+import pipeRepairsPlumber from './assets/images/pipe_repairs_plumber_1782565602867.jpg';
+// @ts-ignore
+import leakDetectionPlumber from './assets/images/leak_detection_improved_1782565729826.jpg';
 
 export const PLUMBING_CATEGORIES: JobCategory[] = [
   {
@@ -59,7 +65,7 @@ export const PLUMBING_CATEGORIES: JobCategory[] = [
     id: 'blocked-sinks',
     title: 'Blocked sinks',
     description: 'Fast clearance of blocked kitchen sinks, bathroom basins, and utility basins. Includes grease trap and U-bend cleaning.',
-    imageUrl: 'https://images.unsplash.com/photo-1607472586893-edb5ca094e5d?auto=format&fit=crop&q=80&w=800',
+    imageUrl: blockedSinkPlumber,
     iconName: 'Droplets',
     typicalIssues: [
       'Kitchen sink filled with greasy, standing water',
@@ -72,7 +78,7 @@ export const PLUMBING_CATEGORIES: JobCategory[] = [
     id: 'pipe-repairs',
     title: 'Water supply Pipe Repairs',
     description: 'Immediate patching or replacement of burst pipes, copper pipes, galvanized steel, and poly-cop fittings to prevent property damage.',
-    imageUrl: 'https://images.unsplash.com/photo-1542013936693-8848e5744262?auto=format&fit=crop&q=80&w=800',
+    imageUrl: pipeRepairsPlumber,
     iconName: 'Activity',
     typicalIssues: [
       'Burst pipe spraying water with massive pressure',
@@ -85,7 +91,7 @@ export const PLUMBING_CATEGORIES: JobCategory[] = [
     id: 'leak-detection',
     title: 'Water Leak Detection',
     description: 'Non-invasive acoustic, thermal, and tracer gas leak detection to find hidden underground, wall, or slab leaks before they destroy structures.',
-    imageUrl: 'https://images.unsplash.com/photo-1508962914676-134849a727f0?auto=format&fit=crop&q=80&w=800',
+    imageUrl: leakDetectionPlumber,
     iconName: 'Search',
     typicalIssues: [
       'Water meter spinning rapidly when all taps are closed',
