@@ -73,6 +73,10 @@ export default function Header({
                   <span className="bg-red-100 text-red-700 text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide leading-none shrink-0">
                     Plumber
                   </span>
+                ) : currentUser.role === 'crew' ? (
+                  <span className="bg-blue-100 text-blue-700 text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide leading-none shrink-0">
+                    Crew
+                  </span>
                 ) : (
                   <span className="bg-slate-100 text-slate-600 text-[9px] font-black uppercase px-1.5 py-0.5 rounded tracking-wide leading-none shrink-0">
                     Client

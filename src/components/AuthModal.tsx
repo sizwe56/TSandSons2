@@ -4,7 +4,7 @@ import { SOUTH_AFRICAN_PROVINCES } from '../data';
 import { X, Mail, Lock, User as UserIcon, Phone, MapPin, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './Logo';
-import { saveUserProfile, getUserProfileByEmail } from '../lib/firebase';
+import { saveUserProfile, getUserProfileByEmail, getPlumberByPlumberId, generatePlumberIdWithTransaction } from '../lib/firebase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -30,11 +30,13 @@ export default function AuthModal({
   const [city, setCity] = useState('Pretoria');
   const [province, setProvince] = useState('Gauteng');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'client' | 'plumber'>('client');
+  const [role, setRole] = useState<'client' | 'plumber' | 'crew'>('client');
   const [subscriptionPlan, setSubscriptionPlan] = useState<'monthly' | 'yearly'>('monthly');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
+  const [masterPlumberCode, setMasterPlumberCode] = useState('');
+  const [crewSpacesLeftMessage, setCrewSpacesLeftMessage] = useState('');
   
   // Forgot Password States
   const [resetEmail, setResetEmail] = useState('');
@@ -156,6 +158,29 @@ export default function AuthModal({
     }
 
     // Secure/Simulated Validation for Plumber subscriptions
+    let masterPlumberObj: User | null = null;
+    if (role === 'crew') {
+      if (!masterPlumberCode) {
+        setError('Please enter a Master Plumber ID Code to link your crew account');
+        return;
+      }
+      const formattedCode = masterPlumberCode.toUpperCase().trim();
+      if (!formattedCode.match(/^PLM-[0-9]{6}$/)) {
+        setError('Please enter a valid Master Plumber ID (Format: PLM-000001)');
+        return;
+      }
+      masterPlumberObj = await getPlumberByPlumberId(formattedCode);
+      if (!masterPlumberObj) {
+        setError('The entered Master Plumber ID does not exist. Please check with your supervisor.');
+        return;
+      }
+      const currentCrewCount = masterPlumberObj.crewMemberIds?.length || 0;
+      if (currentCrewCount >= 5) {
+        setError('This Master Plumber has already registered the maximum limit of 5 crew members.');
+        return;
+      }
+    }
+
     if (role === 'plumber') {
       const cleanCard = cardNumber.replace(/\s/g, '');
       if (cleanCard.length < 13 || cleanCard.length > 19 || !/^\d+$/.test(cleanCard)) {
@@ -187,9 +212,10 @@ export default function AuthModal({
       }
 
       const isPretoriaGauteng = province === 'Gauteng' && city.trim().toLowerCase() === 'pretoria';
+      const newUserId = 'usr_' + Math.random().toString(36).substr(2, 9);
 
-      const newUser: User = {
-        id: 'usr_' + Math.random().toString(36).substr(2, 9),
+      let newUser: User = {
+        id: newUserId,
         fullName,
         email,
         phone,
@@ -198,14 +224,45 @@ export default function AuthModal({
         city: city.trim(),
         province,
         isPretoriaGauteng,
-        role,
-        ...(role === 'plumber' ? {
-          subscriptionPlan,
-          subscriptionStatus: 'active'
-        } : {
-          role: 'client'
-        })
+        role
       };
+
+      if (role === 'plumber') {
+        const nextPlumberId = await generatePlumberIdWithTransaction();
+        const paidDuration = subscriptionPlan === 'yearly' ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+        const paidUntil = new Date(Date.now() + paidDuration).toISOString();
+        newUser = {
+          ...newUser,
+          plumberId: nextPlumberId,
+          subscriptionPlan,
+          subscriptionStatus: 'active',
+          monthlyPaid: true,
+          paidUntil,
+          isMaster: true,
+          crewMemberIds: [],
+          activeJobId: null
+        };
+      } else if (role === 'crew' && masterPlumberObj) {
+        newUser = {
+          ...newUser,
+          masterPlumberId: masterPlumberObj.id,
+          restricted: true,
+          subscriptionStatus: masterPlumberObj.subscriptionStatus || 'active',
+          activeJobId: null
+        };
+
+        // Update Master Plumber's crew list in database
+        const updatedCrewList = [...(masterPlumberObj.crewMemberIds || []), newUserId];
+        await saveUserProfile({
+          ...masterPlumberObj,
+          crewMemberIds: updatedCrewList
+        });
+      } else {
+        newUser = {
+          ...newUser,
+          role: 'client'
+        };
+      }
 
       // Save to Firestore & local storage
       await saveUserProfile(newUser);
@@ -480,45 +537,118 @@ export default function AuthModal({
                 1. Account Type Selection
               </h4>
 
-              <div className="grid grid-cols-2 gap-3 mb-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-2">
                 <div 
                   onClick={() => setRole('client')}
-                  className={`p-3.5 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
+                  className={`p-3 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
                     role === 'client' 
                       ? 'border-red-600 bg-red-50/20 shadow-sm' 
                       : 'border-slate-200 hover:border-slate-300 bg-white'
                   }`}
                 >
                   <div>
-                    <span className="font-bold text-sm text-slate-900 block">Client Account</span>
-                    <span className="text-[11px] text-slate-500 mt-1 block leading-normal">
-                      For individuals & properties needing rapid emergency dispatch.
+                    <span className="font-bold text-xs text-slate-900 block">Client</span>
+                    <span className="text-[10px] text-slate-500 mt-1 block leading-normal">
+                      Need rapid emergency plumbing dispatches.
                     </span>
                   </div>
-                  <span className="text-emerald-600 font-mono text-[10px] font-black mt-3 block uppercase tracking-wider">
-                    FREE REGISTRATION
+                  <span className="text-emerald-600 font-mono text-[9px] font-black mt-3 block uppercase tracking-wider">
+                    FREE REGISTER
                   </span>
                 </div>
 
                 <div 
                   onClick={() => setRole('plumber')}
-                  className={`p-3.5 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
+                  className={`p-3 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
                     role === 'plumber' 
                       ? 'border-red-600 bg-red-50/20 shadow-sm' 
                       : 'border-slate-200 hover:border-slate-300 bg-white'
                   }`}
                 >
                   <div>
-                    <span className="font-bold text-sm text-slate-900 block">Plumber Account</span>
-                    <span className="text-[11px] text-slate-500 mt-1 block leading-normal">
-                      For official Pretoria plumbers looking to receive jobs.
+                    <span className="font-bold text-xs text-slate-900 block">Plumber</span>
+                    <span className="text-[10px] text-slate-500 mt-1 block leading-normal">
+                      Get and accept active emergency tickets.
                     </span>
                   </div>
-                  <span className="text-red-600 font-mono text-[10px] font-black mt-3 block uppercase tracking-wider">
-                    PAID SUBSCRIPTION
+                  <span className="text-red-600 font-mono text-[9px] font-black mt-3 block uppercase tracking-wider">
+                    R50 / MONTH
+                  </span>
+                </div>
+
+                <div 
+                  onClick={() => setRole('crew')}
+                  className={`p-3 rounded-2xl border-2 cursor-pointer transition text-left flex flex-col justify-between h-full ${
+                    role === 'crew' 
+                      ? 'border-red-600 bg-red-50/20 shadow-sm' 
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">Crew Member</span>
+                    <span className="text-[10px] text-slate-500 mt-1 block leading-normal">
+                      Link with an existing Pretoria plumbing team.
+                    </span>
+                  </div>
+                  <span className="text-blue-600 font-mono text-[9px] font-black mt-3 block uppercase tracking-wider">
+                    TEAM JOIN CODE
                   </span>
                 </div>
               </div>
+
+              {role === 'crew' && (
+                <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-3 animate-fade-in">
+                  <span className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Link with Master Plumber Account
+                  </span>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                      Enter Master Plumber ID Code
+                    </label>
+                    <input
+                      id="crew-plumber-code"
+                      type="text"
+                      placeholder="e.g. PLM-000001"
+                      value={masterPlumberCode}
+                      onChange={async (e) => {
+                        const code = e.target.value.toUpperCase();
+                        setMasterPlumberCode(code);
+                        if (code.match(/^PLM-[0-9]{6}$/)) {
+                          const master = await getPlumberByPlumberId(code);
+                          if (master) {
+                            const count = master.crewMemberIds?.length || 0;
+                            if (count >= 5) {
+                              setCrewSpacesLeftMessage('❌ This Plumber ID has already reached the maximum limit of 5 crew members.');
+                            } else if (count === 4) {
+                              setCrewSpacesLeftMessage('⚠️ One plumber space left');
+                            } else {
+                              const left = 5 - count;
+                              setCrewSpacesLeftMessage(`✅ Linked! ${left} spaces remaining on this team.`);
+                            }
+                          } else {
+                            setCrewSpacesLeftMessage('❌ Plumber ID not found. Please double check.');
+                          }
+                        } else {
+                          setCrewSpacesLeftMessage('');
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-red-500 font-mono"
+                      required={role === 'crew'}
+                    />
+                    {crewSpacesLeftMessage && (
+                      <p className={`text-xs mt-1.5 font-bold ${
+                        crewSpacesLeftMessage.includes('❌') ? 'text-red-600' : 
+                        crewSpacesLeftMessage.includes('One') ? 'text-amber-600' : 'text-emerald-600'
+                      }`}>
+                        {crewSpacesLeftMessage}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 text-center italic leading-normal">
+                    Crew members are added under a Master Plumber and cannot accept jobs independently or receive direct payments.
+                  </p>
+                </div>
+              )}
 
               {role === 'plumber' && (
                 <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-3 animate-fade-in">

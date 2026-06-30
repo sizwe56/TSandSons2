@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CreditCard, Lock, ShieldCheck, AlertCircle, X, Smartphone, Loader2, CheckCircle2 } from 'lucide-react';
+import { CreditCard, Lock, ShieldCheck, AlertCircle, X, Smartphone, Loader2, CheckCircle2, ExternalLink, ShieldAlert } from 'lucide-react';
 import { CalloutRequest } from '../types';
 
 interface PaymentModalProps {
@@ -10,13 +10,14 @@ interface PaymentModalProps {
 }
 
 export default function PaymentModal({ request, onClose, onPaymentSuccess }: PaymentModalProps) {
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'eft' | 'scan'>('card');
+  const [paymentMethod, setPaymentMethod] = useState<'capitec' | 'card' | 'eft' | 'scan'>('capitec');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [showOtp, setShowOtp] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpError, setOtpError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
 
   // Form states
   const [cardName, setCardName] = useState('');
@@ -24,6 +25,116 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
   const [selectedBank, setSelectedBank] = useState('FNB');
+
+  const generateLegalPDFBlob = (requestData: Partial<CalloutRequest>) => {
+    const content = `%PDF-1.4
+%
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources 4 0 R /MediaBox [0 0 595 842] /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+endobj
+5 0 obj
+<< /Length 1500 >>
+stream
+BT
+/F1 18 Tf
+50 800 Td
+(T&S RAPID-RESPONSE PLUMBING SERVICE AGREEMENT) Tj
+/F1 12 Tf
+0 -30 Td
+(Invoice Number: ${requestData.invoiceNumber || 'N/A'}) Tj
+0 -20 Td
+(Created Date: ${requestData.createdAt || new Date().toISOString()}) Tj
+0 -20 Td
+(Client Name: ${requestData.clientName || 'N/A'}) Tj
+0 -20 Td
+(Property Location: ${requestData.clientAddress || 'N/A'}, ${requestData.clientCity || 'N/A'}, ${requestData.clientProvince || 'N/A'}) Tj
+0 -30 Td
+/F1 14 Tf
+(1. SERVICE CLASSIFICATION AND BILLING) Tj
+/F2 10 Tf
+0 -15 Td
+(Service Level Chosen: ${requestData.isEmergency ? 'EMERGENCY DISPATCH' : 'STANDARD WORK ORDER'}) Tj
+0 -15 Td
+(Expected Response Window: ${requestData.responsePeriod || 'N/A'}) Tj
+0 -15 Td
+(Base Call-out Fee: R${requestData.baseFee || '1,000.00'}) Tj
+0 -15 Td
+(Location Surcharge: R${requestData.surcharge || '0.00'}) Tj
+0 -15 Td
+(Grand Total Dispatch Amount: R${requestData.totalAmount || '1,000.00'}) Tj
+0 -30 Td
+/F1 14 Tf
+(2. CONSUMER PROTECTION ACT (CPA) SECTION 54 AND POPIA DISCLAIMER) Tj
+/F2 10 Tf
+0 -15 Td
+(Pursuant to Section 54 of the South African Consumer Protection Act, 68 of 2008, emergency dispatches) Tj
+0 -15 Td
+(are classified as instant, time-critical service solutions. Due to the immediate deployment of vehicles,) Tj
+0 -15 Td
+(tools, and specialized personnel, emergency dispatch call-out fees are strictly NON-REFUNDABLE once) Tj
+0 -15 Td
+(accepted by a certified plumber. Standard services carry a standard 48-hour response window and are) Tj
+0 -15 Td
+(subject to general standard cancellation and refund policies.) Tj
+0 -20 Td
+(All client personal identifiable information (PII) is handled in strict compliance with the Protection) Tj
+0 -15 Td
+(of Personal Information Act (POPIA), Act 4 of 2013. Client data is hidden from non-participating actors) Tj
+0 -15 Td
+(and is only unlocked for the assigned plumber upon formal dispatch confirmation.) Tj
+0 -30 Td
+/F1 14 Tf
+(3. CLIENT SIGN-OFF AND PROJECT COMPLETION) Tj
+/F2 10 Tf
+0 -15 Td
+(Plumbers will remain active and locked into the active state until the client performs a digital sign-off,) Tj
+0 -15 Td
+(submitting rating scores and surveys. Any subsequent queries or adjustments must be recorded on) Tj
+0 -15 Td
+(the rapid-response ledger.) Tj
+0 -40 Td
+(___________________________                         ___________________________) Tj
+0 -12 Td
+(Resident Client Signature                           Authorized T&S Plumber Sign-off) Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000018 00000 n 
+0000000067 00000 n 
+0000000121 00000 n 
+0000000227 00000 n 
+0000000354 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1950
+%%EOF`;
+    return new Blob([content], { type: 'application/pdf' });
+  };
+
+  const handleDownloadLegalPDF = () => {
+    const blob = generateLegalPDFBlob(request);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Rapid_Response_Plumbing_Agreement_${request.invoiceNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // Let's compute potential additional service costs
   // If the status is 'Completed' or 'In Progress', there might have been additional plumbing work
@@ -68,7 +179,7 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
     }
     setAdditionalRepairs(extraTasks);
     // If the request is Completed, we automatically add the repairs to represent the final bill
-    if (request.status === 'Completed' || request.status === 'In Progress') {
+    if (request.status === 'COMPLETED' || request.status === 'IN_PROGRESS') {
       setAddExtraRepairs(true);
     }
   }, [request]);
@@ -111,6 +222,10 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
 
   const startPaymentProcess = (e: React.FormEvent) => {
     e.preventDefault();
+    if (request.isEmergency && !legalAccepted) {
+      alert("❌ You must explicitly accept the emergency non-refundable terms and download the SLA Agreement PDF before proceeding to secure checkout.");
+      return;
+    }
     setIsProcessing(true);
     setProcessingStatus('Connecting to secure banking gate...');
 
@@ -324,26 +439,62 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
                 </div>
               </div>
 
+              {request.isEmergency && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl space-y-3">
+                  <div className="flex items-start space-x-2">
+                    <ShieldAlert className="h-4.5 w-4.5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-amber-800 text-[11px] block">EMERGENCY DISPATCH WARRANTY DISCLAIMER</span>
+                      <p className="leading-relaxed text-[10px] text-amber-700 mt-0.5">
+                        Pursuant to Consumer Protection Act (CPA) Section 54, instant emergency mobilizations are final, critical, and <strong>strictly non-refundable</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      id="download-payment-pdf-btn"
+                      onClick={handleDownloadLegalPDF}
+                      className="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 font-bold text-[10px] py-1.5 px-3 rounded-lg flex items-center justify-center space-x-1 transition flex-1"
+                    >
+                      <span>📄 Pre-Download Legal SLA PDF</span>
+                    </button>
+
+                    <label className="flex items-center space-x-2 cursor-pointer bg-white px-2.5 py-1.5 border border-amber-200 rounded-lg hover:bg-amber-50 transition flex-1">
+                      <input
+                        type="checkbox"
+                        checked={legalAccepted}
+                        onChange={(e) => setLegalAccepted(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded text-amber-600 border-amber-300 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="text-[9.5px] font-bold text-amber-900">Accept Non-Refundable SLA</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {/* Payment Method Selector Tabs */}
-              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-full">
+              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-full">
                 {[
-                  { id: 'card', label: 'Credit Card', icon: CreditCard },
-                  { id: 'eft', label: 'Instant EFT', icon: ShieldCheck },
-                  { id: 'scan', label: 'Scan To Pay', icon: Smartphone }
+                  { id: 'capitec', label: 'Capitec', icon: ShieldCheck },
+                  { id: 'card', label: 'Card', icon: CreditCard },
+                  { id: 'eft', label: 'EFT', icon: Lock },
+                  { id: 'scan', label: 'Scan', icon: Smartphone }
                 ].map((m) => {
                   const Icon = m.icon;
                   return (
                     <button
                       key={m.id}
                       onClick={() => setPaymentMethod(m.id as any)}
-                      className={`flex items-center justify-center space-x-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all duration-200 ${
+                      className={`flex items-center justify-center space-x-1 py-2 px-1.5 rounded-full text-[11px] font-bold transition-all duration-200 ${
                         paymentMethod === m.id
                           ? 'bg-white text-slate-950 shadow-sm'
                           : 'text-slate-500 hover:text-slate-800'
                       }`}
                     >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span>{m.label}</span>
+                      <Icon className="w-3 h-3" />
+                      <span className="truncate">{m.label}</span>
                     </button>
                   );
                 })}
@@ -351,6 +502,90 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
 
               {/* Form Renderers */}
               <AnimatePresence mode="wait">
+                {paymentMethod === 'capitec' && (
+                  <motion.div
+                    key="capitec-form"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="space-y-4"
+                  >
+                    {/* Capitec Bank Info Banner */}
+                    <div className="bg-gradient-to-r from-teal-550 to-teal-650 bg-teal-600 text-white rounded-2xl p-4 border border-teal-500 shadow-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-widest font-bold text-teal-100">Preferred Partner Portal</span>
+                        <span className="bg-white/20 text-[9px] font-bold px-2 py-0.5 rounded-full">Instant EFT</span>
+                      </div>
+                      <h4 className="font-display font-black text-base">Capitec Bank PayMe</h4>
+                      <p className="text-[11px] text-teal-50/90 leading-relaxed">
+                        Settle your call-out or repair invoice instantly via Capitec's safe peer-to-peer payment gateway.
+                      </p>
+                    </div>
+
+                    {/* Step-by-step Instructions */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-3">
+                      <span className="font-bold text-slate-700 block uppercase tracking-wider text-[10px]">How to pay:</span>
+                      
+                      <ul className="space-y-2.5 text-slate-600 text-[11px]">
+                        <li className="flex items-start">
+                          <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px] shrink-0 mr-2 mt-0.5">1</span>
+                          <span>Click the secure button below to launch the official Capitec PayMe portal in a new tab.</span>
+                        </li>
+                        <li className="flex items-start">
+                          <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px] shrink-0 mr-2 mt-0.5">2</span>
+                          <span>Enter your banking credentials or scan the screen to authorize the exact amount of <strong>R{getFinalTotal().toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</strong>.</span>
+                        </li>
+                        <li className="flex items-start">
+                          <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px] shrink-0 mr-2 mt-0.5">3</span>
+                          <span>Once finished, click <strong>Confirm Settle</strong> below to automatically update your invoice and notify dispatch.</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Direct External Link to Capitec PayMe */}
+                    <div className="pt-2">
+                      <a
+                        href="https://pay.capitecbank.co.za/payme/2QI6HM"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full bg-teal-600 hover:bg-teal-700 text-white font-extrabold py-3.5 px-4 rounded-full flex items-center justify-center space-x-2 transition shadow-md hover:shadow-lg text-sm text-center"
+                      >
+                        <span>Open Capitec PayMe Portal</span>
+                        <ExternalLink className="w-4 h-4 shrink-0" />
+                      </a>
+                      <span className="text-[10px] text-slate-400 text-center block mt-1.5 font-mono">
+                        Secure Link: pay.capitecbank.co.za/payme/2QI6HM
+                      </span>
+                    </div>
+
+                    {/* Simulation Confirmation Button */}
+                    <button
+                      type="button"
+                      disabled={request.isEmergency && !legalAccepted}
+                      onClick={() => {
+                        setIsProcessing(true);
+                        setProcessingStatus('Verifying transaction on Capitec Network...');
+                        setTimeout(() => {
+                          setIsProcessing(false);
+                          setPaymentSuccess(true);
+                          setTimeout(() => {
+                            onPaymentSuccess(
+                              'Capitec PayMe (Instant)',
+                              getFinalTotal(),
+                              getExtraCostTotal()
+                            );
+                          }, 1500);
+                        }, 1800);
+                      }}
+                      className={`w-full border-2 border-slate-900 text-slate-900 font-black py-3 rounded-full hover:bg-slate-50 transition text-sm flex items-center justify-center space-x-1.5 mt-2 ${
+                        request.isEmergency && !legalAccepted ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      <span>I Have Paid (Confirm Settle)</span>
+                    </button>
+                  </motion.div>
+                )}
+
                 {paymentMethod === 'card' && (
                   <motion.form
                     key="card-form"
@@ -422,7 +657,10 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
 
                     <button
                       type="submit"
-                      className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-6 text-sm"
+                      disabled={request.isEmergency && !legalAccepted}
+                      className={`w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-6 text-sm ${
+                        request.isEmergency && !legalAccepted ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
                       Authorize Card: R{getFinalTotal().toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
                     </button>
@@ -469,7 +707,10 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
 
                     <button
                       type="submit"
-                      className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-4 text-sm"
+                      disabled={request.isEmergency && !legalAccepted}
+                      className={`w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-4 text-sm ${
+                        request.isEmergency && !legalAccepted ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
                       Proceed to {selectedBank} Portal
                     </button>
@@ -501,7 +742,10 @@ export default function PaymentModal({ request, onClose, onPaymentSuccess }: Pay
 
                     <button
                       onClick={startPaymentProcess}
-                      className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-4 text-sm flex items-center justify-center space-x-1.5"
+                      disabled={request.isEmergency && !legalAccepted}
+                      className={`w-full bg-slate-900 text-white font-bold py-3.5 rounded-full hover:bg-slate-800 transition shadow-md hover:shadow-lg mt-4 text-sm flex items-center justify-center space-x-1.5 ${
+                        request.isEmergency && !legalAccepted ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
                       <span>Simulate QR Code Scan</span>
                     </button>

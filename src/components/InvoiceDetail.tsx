@@ -18,7 +18,7 @@ export default function InvoiceDetail({
 }: InvoiceDetailProps) {
   if (!isOpen || !request) return null;
 
-  const isPaid = request.isPaid || request.status === 'Completed';
+  const isPaid = request.isPaid || request.status === 'COMPLETED' || request.status === 'CLOSED';
   const additionalCost = request.additionalAmount || 0;
   const billingTotal = request.totalAmount + additionalCost;
   
@@ -139,6 +139,27 @@ export default function InvoiceDetail({
             </div>
           </div>
 
+          {/* Project Details */}
+          {(request.projectName || request.projectDescription) && (
+            <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-4 text-xs space-y-1.5">
+              <span className="text-slate-400 font-bold uppercase tracking-wider block mb-1">
+                Project Information (Assigned Service)
+              </span>
+              {request.projectName && (
+                <div>
+                  <span className="font-semibold text-slate-700">Project Name:</span>
+                  <span className="text-slate-800 ml-1.5 font-bold bg-slate-100 px-2 py-0.5 rounded">{request.projectName}</span>
+                </div>
+              )}
+              {request.projectDescription && (
+                <div className="pt-1">
+                  <span className="font-semibold text-slate-700 block mb-0.5">Project Description / Reported Issues:</span>
+                  <p className="text-slate-600 italic bg-white p-2.5 rounded-lg border border-slate-100 leading-relaxed">&ldquo;{request.projectDescription}&rdquo;</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Line Items Table */}
           <div className="space-y-4">
             <span className="text-slate-400 font-bold uppercase tracking-wider block text-xs">
@@ -242,7 +263,7 @@ export default function InvoiceDetail({
         </div>
 
         {/* Footer actions */}
-        {!request.isPaid && request.status !== 'Cancelled' && (
+        {!request.isPaid && request.status !== 'CLOSED' && (
           <div className="sticky bottom-0 bg-slate-50 px-6 py-4 border-t border-slate-100 flex items-center justify-between z-20">
             <div className="flex items-center space-x-2 text-xs text-amber-800">
               <Info className="h-4 w-4 text-amber-600 shrink-0" />

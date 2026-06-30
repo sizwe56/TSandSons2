@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /callouts/{calloutId}/{fileName} {
+      // Zero-trust secure storage rules for Pretoria emergency plumbing call-outs
+      allow read: if request.auth != null && (
+        // 1. Client owns the callout
+        firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.userId == request.auth.uid ||
+        // 2. Plumber is assigned to the callout
+        firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.assignedPlumberId == request.auth.uid ||
+        // 3. Portfolio display authorized: Client approved and project is NOT private
+        (
+          firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.photoPortfolioApproved == true &&
+          firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.isPrivateProject != true
+        )
+      );
+      
+      allow write: if request.auth != null && (
+        // Creator (client) can upload before/banner photos
+        firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.userId == request.auth.uid ||
+        // Assigned plumber can upload progress/completed photos
+        firestore.get(/databases/(default)/documents/callouts/$(calloutId)).data.assignedPlumberId == request.auth.uid
+      ) && request.resource.size < 5 * 1024 * 1024 // 5MB Limit to prevent Denial of Wallet
+        && request.resource.contentType.matches('image/.*'); // Only image files allowed
+    }
+  }
+}

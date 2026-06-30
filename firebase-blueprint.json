@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Represents the public or shared details of a user profile (client, plumber, or crew member).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID (matching Firebase Auth UID)." },
+        "email": { "type": "string", "description": "User email address." },
+        "role": { "type": "string", "enum": ["client", "plumber", "crew"], "description": "Account role determining access rights." },
+        "name": { "type": "string", "description": "Display name of the user." },
+        "city": { "type": "string", "description": "City of operation or residence (e.g. Pretoria)." },
+        "province": { "type": "string", "description": "Province (e.g. Gauteng)." },
+        "createdAt": { "type": "string", "description": "Account creation ISO timestamp." },
+        "popiaConsent": { "type": "boolean", "description": "Indicates active agreement with POPIA privacy regulations." },
+        "plumberId": { "type": "string", "description": "Unique assigned identification code (e.g. PLM-000001) for plumbers." },
+        "isPaid": { "type": "boolean", "description": "Whether the plumber has paid their R50 monthly subscription." },
+        "subscriptionExpiry": { "type": "number", "description": "Epoch timestamp when current monthly subscription expires." },
+        "isMaster": { "type": "boolean", "description": "True if plumber is a master plumber who can register crew." },
+        "masterPlumberId": { "type": "string", "description": "If crew member, references their master plumber user ID." },
+        "crewMemberIds": { "type": "array", "description": "If master plumber, lists of up to 5 crew member user IDs." },
+        "bio": { "type": "string", "description": "Plumber short biography and business profile introduction." },
+        "experienceYears": { "type": "number", "description": "Self-reported years of plumbing experience." },
+        "profilePhoto": { "type": "string", "description": "Profile picture storage bucket path or secure URL." },
+        "workPhotos": { "type": "array", "description": "Array of storage paths showcasing completed plumbing tasks." },
+        "rating": { "type": "number", "description": "Average user rating score." },
+        "reviewsCount": { "type": "number", "description": "Total count of reviews received." },
+        "activeJobId": { "type": "string", "description": "If active, the calloutId of their single currently active job." },
+        "activeJob": { "type": "boolean", "description": "Whether the plumber has an active job right now." }
+      },
+      "required": ["id", "email", "role", "name"]
+    },
+    "PrivateUserInfo": {
+      "title": "PrivateUserInfo",
+      "description": "POPIA-sensitive personal contact and verification details for a user profile, accessible only to the owner.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string", "description": "Contact phone number." },
+        "streetAddress": { "type": "string", "description": "Residential or street address details." },
+        "hidePhoneFromPublic": { "type": "boolean", "description": "Whether to hide phone number from other marketplace actors." },
+        "hideAddressFromPublic": { "type": "boolean", "description": "Whether to hide street address details from other actors." }
+      },
+      "required": ["phone"]
+    },
+    "Callout": {
+      "title": "Callout",
+      "description": "Represents a plumbing service job, which can be an Emergency call-out or a Standard job.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique callout document ID." },
+        "userId": { "type": "string", "description": "UID of the client who posted the job." },
+        "jobCategoryId": { "type": "string", "description": "The plumbing specialty category (e.g., Geyser, Burst Pipe, Drain)." },
+        "projectName": { "type": "string", "description": "Name of the project, which matches the selected job category." },
+        "projectDescription": { "type": "string", "description": "Optional issue description or reported plumbing problem." },
+        "issueDescription": { "type": "string", "description": "Required issue description for dispatcher reference (falls back if empty)." },
+        "status": { "type": "string", "enum": ["OPEN", "ACCEPTED", "EN_ROUTE", "IN_PROGRESS", "COMPLETED", "CLOSED"], "description": "Current workflow state of the callout." },
+        "isEmergency": { "type": "boolean", "description": "True if an emergency request, requiring terms acceptance." },
+        "termsAccepted": { "type": "boolean", "description": "Must be true for emergency requests." },
+        "pdfUrl": { "type": "string", "description": "Secure storage URL pointing to the downloadable South African legal contract PDF." },
+        "responsePeriod": { "type": "string", "description": "Expected response period (e.g., Instant for emergency, 48-hours for standard)." },
+        "assignedPlumberId": { "type": "string", "description": "The UID of the assigned plumber or crew member assisting." },
+        "baseFee": { "type": "number", "description": "Mandatory dispatch/call-out fee in ZAR." },
+        "createdAt": { "type": "string", "description": "ISO timestamp representing creation time." },
+        "bannerPhoto": { "type": "string", "description": "Optional storage URL of the banner photo." },
+        "beforePhoto": { "type": "string", "description": "Optional storage URL of the work before photo." },
+        "progressPhoto": { "type": "string", "description": "Optional storage URL of the work progress photo." },
+        "completedPhoto": { "type": "string", "description": "Optional storage URL of the work completed photo." },
+        "isPrivateProject": { "type": "boolean", "description": "Whether this project is private and should never expose images publicly." },
+        "photoPortfolioApproved": { "type": "boolean", "description": "Whether the client approved displaying completed work in portfolio." },
+        "reviewRating": { "type": "number", "description": "Feedback score (1 to 5 stars) given by the client." },
+        "reviewComment": { "type": "string", "description": "Written review comment given by the client." },
+        "surveyFeedback": { "type": "object", "description": "Detailed POPIA-compliant answers to survey questions." },
+        "signedOffAt": { "type": "string", "description": "ISO timestamp when the client signed off on the completed project." }
+      },
+      "required": ["id", "userId", "jobCategoryId", "projectName", "status", "isEmergency", "createdAt"]
+    },
+    "CalloutPIIDetails": {
+      "title": "CalloutPIIDetails",
+      "description": "POPIA-sensitive personal details of the client, hidden until a plumber accepts the job.",
+      "type": "object",
+      "properties": {
+        "clientName": { "type": "string", "description": "Name of the client." },
+        "clientEmail": { "type": "string", "description": "Email address of the client." },
+        "clientPhone": { "type": "string", "description": "Contact phone number of the client." },
+        "clientAddress": { "type": "string", "description": "Full street address for service dispatch." }
+      },
+      "required": ["clientName", "clientPhone", "clientAddress"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A single text message inside a job's real-time messaging channel.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique message ID." },
+        "sender": { "type": "string", "enum": ["user", "plumber"], "description": "Sender identity role." },
+        "text": { "type": "string", "description": "Text body of the message." },
+        "timestamp": { "type": "string", "description": "Locale-formatted hour/minute string." },
+        "read": { "type": "boolean", "description": "Whether the recipient has seen the message." },
+        "createdAt": { "type": "number", "description": "Epoch timestamp used for chronological sorting." }
+      },
+      "required": ["id", "sender", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Main user collection containing basic profiles for clients, plumbers, and crew members."
+    },
+    "/users/{userId}/private/info": {
+      "schema": "PrivateUserInfo",
+      "description": "Strictly guarded private information subcollection under each user."
+    },
+    "/callouts/{calloutId}": {
+      "schema": "Callout",
+      "description": "Marketplace job postings containing general job requirements and dispatch status."
+    },
+    "/callouts/{calloutId}/pii/details": {
+      "schema": "CalloutPIIDetails",
+      "description": "Private client details, accessible only after the callout status is Accepted by an active plumber."
+    },
+    "/callouts/{calloutId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Real-time communication subcollection for messages exchanged between the client and plumber."
+    }
+  }
+}

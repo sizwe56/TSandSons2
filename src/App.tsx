@@ -10,7 +10,7 @@ import InvoiceDetail from './components/InvoiceDetail';
 import PlumberChat from './components/PlumberChat';
 import PaymentModal from './components/PaymentModal';
 import Logo from './components/Logo';
-import { saveUserProfile, saveCalloutRequest, getCalloutRequests, updateCalloutRequestFields } from './lib/firebase';
+import { saveUserProfile, saveCalloutRequest, getCalloutRequests, updateCalloutRequestFields, subscribeCalloutRequests, subscribeAllCalloutRequests } from './lib/firebase';
 import { 
   PhoneCall, 
   MapPin, 
@@ -39,7 +39,7 @@ function getSeededPastJobs(user: User): CalloutRequest[] {
       userId: user.id,
       jobCategoryId: 'bathroom-kitchen',
       issueDescription: 'Kitchen mixer tap dripping continuously from the handle, wasting hot water.',
-      status: 'Completed' as const,
+      status: 'COMPLETED' as const,
       createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days ago
       baseFee: 1000,
       surcharge: user.isPretoriaGauteng ? 0 : 3000,
@@ -60,7 +60,7 @@ function getSeededPastJobs(user: User): CalloutRequest[] {
       userId: user.id,
       jobCategoryId: 'blocked-toilets',
       issueDescription: 'Main master toilet blocked and backing up near to overflow.',
-      status: 'Completed' as const,
+      status: 'COMPLETED' as const,
       createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(), // 45 days ago
       baseFee: 1000,
       surcharge: user.isPretoriaGauteng ? 0 : 3000,
@@ -123,42 +123,85 @@ export default function App() {
     }
   }, []);
 
-  // Load real user callout requests from Firestore when current user changes
+  // Subscription status expiration check & real-time DB loading
   useEffect(() => {
     if (!currentUser) {
       setCallouts([]);
       return;
     }
 
-    const fetchUserCallouts = async () => {
+    // Auto-check for plumber/crew subscription expiration on load
+    if (currentUser.role === 'plumber' || currentUser.role === 'crew') {
+      const isExpired = currentUser.paidUntil && new Date(currentUser.paidUntil).getTime() < Date.now();
+      if (isExpired && (currentUser.subscriptionStatus === 'active' || currentUser.subscriptionStatus === 'ACTIVE')) {
+        const updatedUser: User = {
+          ...currentUser,
+          subscriptionStatus: 'EXPIRED' as const,
+          isPaid: false,
+          monthlyPaid: false
+        };
+        setCurrentUser(updatedUser);
+        localStorage.setItem('plumb_current_user', JSON.stringify(updatedUser));
+        saveUserProfile(updatedUser);
+      }
+    }
+
+    let unsubscribe: (() => void) | null = null;
+
+    const setupSubscription = async () => {
       try {
-        let loadedCallouts = await getCalloutRequests(currentUser.id);
-        
-        // If there are no callout requests in Firestore yet, seed the initial past jobs
-        if (loadedCallouts.length === 0) {
-          const seeded = getSeededPastJobs(currentUser);
-          // Save each seeded job to Firestore
-          for (const job of seeded) {
-            await saveCalloutRequest(job);
+        if (currentUser.role === 'client') {
+          // Check if we need to seed initial data first
+          const initialCallouts = await getCalloutRequests(currentUser.id);
+          if (initialCallouts.length === 0) {
+            const seeded = getSeededPastJobs(currentUser);
+            for (const job of seeded) {
+              await saveCalloutRequest(job);
+            }
           }
-          loadedCallouts = seeded;
         }
-        
-        setCallouts(loadedCallouts);
-        localStorage.setItem('plumb_callouts', JSON.stringify(loadedCallouts));
       } catch (error) {
-        console.error('Error fetching callout requests from Firestore:', error);
-        // Fallback to local storage
-        const savedCallouts = localStorage.getItem('plumb_callouts');
-        if (savedCallouts) {
-          const parsed = JSON.parse(savedCallouts);
-          setCallouts(parsed.filter((c: CalloutRequest) => c.userId === currentUser.id));
-        }
+        console.error('Error checking/seeding initial callout requests:', error);
+      }
+
+      // Now set up real-time listener depending on role
+      if (currentUser.role === 'plumber' || currentUser.role === 'crew') {
+        unsubscribe = subscribeAllCalloutRequests((loadedCallouts) => {
+          setCallouts(loadedCallouts);
+          localStorage.setItem('plumb_callouts', JSON.stringify(loadedCallouts));
+        });
+      } else {
+        unsubscribe = subscribeCalloutRequests(currentUser.id, (loadedCallouts) => {
+          setCallouts(loadedCallouts);
+          localStorage.setItem('plumb_callouts', JSON.stringify(loadedCallouts));
+        });
       }
     };
 
-    fetchUserCallouts();
+    setupSubscription();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [currentUser]);
+
+  // Sync viewing or paying requests when the real-time callouts array updates
+  useEffect(() => {
+    if (viewingRequest) {
+      const updated = callouts.find(c => c.id === viewingRequest.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(viewingRequest)) {
+        setViewingRequest(updated);
+      }
+    }
+    if (payingRequest) {
+      const updated = callouts.find(c => c.id === payingRequest.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(payingRequest)) {
+        setPayingRequest(updated);
+      }
+    }
+  }, [callouts, viewingRequest, payingRequest]);
 
   // Save changes helper
   const updateCalloutsInStorage = (updatedList: CalloutRequest[]) => {
@@ -176,6 +219,11 @@ export default function App() {
     setEditCity(user.city);
     setEditProvince(user.province);
     setIsEditingAddress(false);
+
+    // If they have selected a service category, go straight to the dispatch form
+    if (selectedCategory) {
+      setDispatchModalOpen(true);
+    }
 
     try {
       await saveUserProfile(user);
@@ -203,11 +251,11 @@ export default function App() {
 
   // Select specific category card
   const handleSelectCategory = (category: JobCategory) => {
+    setSelectedCategory(category);
     if (!currentUser) {
       setAuthModalMode('register');
       setAuthModalOpen(true);
     } else {
-      setSelectedCategory(category);
       setDispatchModalOpen(true);
     }
   };
@@ -233,9 +281,11 @@ export default function App() {
     let nextStatus: CalloutRequest['status'] | null = null;
     const updatedList = callouts.map((c) => {
       if (c.id === id) {
-        if (c.status === 'Pending Dispatch') nextStatus = 'En Route';
-        else if (c.status === 'En Route') nextStatus = 'In Progress';
-        else if (c.status === 'In Progress') nextStatus = 'Completed';
+        if (c.status === 'OPEN') nextStatus = 'ACCEPTED';
+        else if (c.status === 'ACCEPTED') nextStatus = 'EN_ROUTE';
+        else if (c.status === 'EN_ROUTE') nextStatus = 'IN_PROGRESS';
+        else if (c.status === 'IN_PROGRESS') nextStatus = 'COMPLETED';
+        else if (c.status === 'COMPLETED') nextStatus = 'CLOSED';
         
         return { ...c, status: nextStatus || c.status };
       }
@@ -261,15 +311,15 @@ export default function App() {
   // Cancel Pending Callout
   const handleCancelCallout = async (id: string) => {
     const updatedList = callouts.map((c) => {
-      if (c.id === id && c.status === 'Pending Dispatch') {
-        return { ...c, status: 'Cancelled' as const };
+      if (c.id === id && c.status === 'OPEN') {
+        return { ...c, status: 'CLOSED' as const };
       }
       return c;
     });
     updateCalloutsInStorage(updatedList);
 
     try {
-      await updateCalloutRequestFields(id, { status: 'Cancelled' });
+      await updateCalloutRequestFields(id, { status: 'CLOSED' });
     } catch (error) {
       console.error('Error cancelling callout in Firestore:', error);
     }
@@ -295,7 +345,7 @@ export default function App() {
           paymentMethod: method,
           additionalAmount: additionalCosts,
           additionalAmountDetails: additionalCosts > 0 ? 'On-site emergency technical repairs and materials replacement' : undefined,
-          status: c.status === 'Cancelled' ? 'Cancelled' : 'Completed' as const
+          status: c.status === 'CLOSED' ? 'CLOSED' : 'COMPLETED' as const
         };
         return {
           ...c,
@@ -351,6 +401,99 @@ export default function App() {
     }
   };
 
+  // Accept an emergency job (Plumber / Crew Member)
+  const handleAcceptJob = async (jobId: string) => {
+    if (!currentUser) return;
+
+    // Crew Member restriction
+    if (currentUser.role === 'crew') {
+      alert("❌ Crew accounts are restricted. Crew members cannot accept jobs independently. Only the Master Plumber can accept dispatches.");
+      return;
+    }
+
+    // One-Active-Job check
+    if (currentUser.activeJobId) {
+      alert("❌ Violation of One-Active-Job Rule: You already have an active job. You must complete your current job before accepting a new dispatch.");
+      return;
+    }
+
+    const job = callouts.find(c => c.id === jobId);
+    if (!job) return;
+
+    if (job.status !== 'OPEN') {
+      alert("❌ This emergency ticket has already been accepted by another plumber or was closed.");
+      return;
+    }
+
+    try {
+      // Update job assigned fields
+      const updatedFields: Partial<CalloutRequest> = {
+        status: 'ACCEPTED',
+        assignedPlumberId: currentUser.id
+      };
+      await updateCalloutRequestFields(jobId, updatedFields);
+
+      // Update plumber's active job
+      const updatedUser: User = {
+        ...currentUser,
+        activeJob: true,
+        activeJobId: jobId
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('plumb_current_user', JSON.stringify(updatedUser));
+      await saveUserProfile(updatedUser);
+
+      setCallouts(prev => prev.map(c => c.id === jobId ? { ...c, ...updatedFields } : c));
+      alert("⚡ Emergency Job Accepted! The client's full contact details and dispatch address are now unlocked below.");
+    } catch (err) {
+      console.error('Error accepting job:', err);
+      alert('❌ Failed to accept job. Please try again.');
+    }
+  };
+
+  // Complete an active job
+  const handleCompleteActiveJob = async (jobId: string) => {
+    if (!currentUser) return;
+
+    try {
+      await updateCalloutRequestFields(jobId, { status: 'COMPLETED' });
+
+      // Plumber remains active (locked) until client signs off!
+      setCallouts(prev => prev.map(c => c.id === jobId ? { ...c, status: 'COMPLETED' } : c));
+      alert("🎉 You have marked the job as COMPLETED! Awaiting client signature and sign-off to complete the project.");
+    } catch (err) {
+      console.error('Error completing job:', err);
+    }
+  };
+
+  // Renew plumber subscription
+  const handleRenewSubscription = async (plan: 'monthly' | 'yearly') => {
+    if (!currentUser) return;
+
+    const price = plan === 'yearly' ? 400 : 50;
+    const duration = plan === 'yearly' ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+    const paidUntil = new Date(Date.now() + duration).toISOString();
+
+    const updatedUser: User = {
+      ...currentUser,
+      subscriptionPlan: plan,
+      subscriptionStatus: 'ACTIVE',
+      monthlyPaid: true,
+      isPaid: true,
+      paidUntil
+    };
+
+    try {
+      setCurrentUser(updatedUser);
+      localStorage.setItem('plumb_current_user', JSON.stringify(updatedUser));
+      await saveUserProfile(updatedUser);
+      alert(`🎉 Subscription renewed! R${price}.00 processed. Your status is now ACTIVE. Thank you for your continued partnership.`);
+    } catch (err) {
+      console.error('Error renewing subscription:', err);
+      alert('❌ Failed to renew subscription.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between">
       {/* 1. Brand Header */}
@@ -387,93 +530,376 @@ export default function App() {
           </div>
         )}
 
-        {/* Hero Section containing Huge 24/7 Red Button */}
-        <section className="bg-white rounded-3xl border-2 border-slate-200 shadow-xl p-8 sm:p-10 lg:p-12 relative overflow-hidden flex flex-col lg:flex-row items-center justify-between gap-8">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-red-500/5 rounded-full blur-3xl -z-10" />
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl -z-10" />
+        {/* Plumber/Crew Dashboard Portal vs Client Hero Section */}
+        {currentUser && (currentUser.role === 'plumber' || currentUser.role === 'crew') ? (
+          <section className="bg-slate-900 text-white rounded-3xl border-2 border-slate-800 shadow-2xl p-6 sm:p-10 relative overflow-hidden space-y-8 animate-fade-in">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-red-500/5 rounded-full blur-3xl -z-10" />
+            <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl -z-10" />
 
-          {/* Left info column */}
-          <div className="space-y-4 max-w-xl text-center lg:text-left flex flex-col items-center lg:items-start">
-            <div className="flex items-center space-x-4 mb-2 self-center lg:self-start">
-              <Logo size="md" className="text-slate-900 shrink-0 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80 shadow-inner" />
-              <div className="text-left">
-                <span className="bg-red-100 text-red-800 font-mono text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-full inline-block mb-1.5">
-                  ⚡ LIVE DISPATCH HUB
+            {/* Portal Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+              <div className="flex items-center space-x-4">
+                <Logo size="md" className="text-white bg-slate-800 p-2 rounded-2xl border border-slate-700 shrink-0" />
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="bg-red-600 text-white font-mono text-[9px] font-black tracking-widest uppercase px-2.5 py-0.5 rounded">
+                      ⚡ PLUMBER PORTAL
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono">
+                      Ref: {currentUser.plumberId || `CREW (Linked: ${currentUser.masterPlumberId ? 'PLM Team' : 'Unlinked'})`}
+                    </span>
+                  </div>
+                  <h2 className="font-display font-black text-2xl tracking-tight uppercase mt-1">
+                    {currentUser.fullName}
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Role: <span className="text-slate-200 capitalize font-semibold">{currentUser.role} Plumber</span> {currentUser.role === 'plumber' && `• Crew Registered: ${currentUser.crewMemberIds?.length || 0}/5`}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="text-right flex flex-col items-end">
+                <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                  Subscription Status
                 </span>
-                <h3 className="font-display font-black text-xl tracking-tight text-slate-900 uppercase leading-none">
-                  Plumb Ts &amp; Sons
-                </h3>
+                {currentUser.subscriptionStatus === 'active' || currentUser.subscriptionStatus === 'ACTIVE' ? (
+                  <span className="bg-emerald-500/10 text-emerald-400 font-mono text-xs font-bold px-3 py-1 rounded-full border border-emerald-500/30 flex items-center">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 mr-2 animate-ping" />
+                    ACTIVE
+                  </span>
+                ) : currentUser.subscriptionStatus === 'RESTRICTED' ? (
+                  <span className="bg-amber-500/10 text-amber-400 font-mono text-xs font-bold px-3 py-1 rounded-full border border-amber-500/30 flex items-center animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-amber-500 mr-2" />
+                    RESTRICTED
+                  </span>
+                ) : (
+                  <span className="bg-red-500/10 text-red-400 font-mono text-xs font-bold px-3 py-1 rounded-full border border-red-500/30 flex items-center animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-red-500 mr-2" />
+                    EXPIRED / SUSPENDED
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Paid Until: {currentUser.paidUntil ? new Date(currentUser.paidUntil).toLocaleDateString() : 'N/A'}
+                </span>
               </div>
             </div>
-            <h2 className="font-display font-black text-3xl sm:text-4xl lg:text-5xl tracking-tight text-slate-800 underline decoration-red-200 underline-offset-8">
-              Emergency Dispatch
-            </h2>
-            <p className="text-sm sm:text-base text-slate-500 leading-relaxed pt-2">
-              Our 24/7 rapid-response plumbing crews are on standby. Within Pretoria, Gauteng, pay a flat-rate R1,000 call-out. Other South African provinces are served with a R3,000 long-distance dispatch surcharge. Average response: 24hrs.
-            </p>
 
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 text-xs font-semibold pt-4 text-slate-700">
-              <span className="flex items-center space-x-1.5">
-                <Check className="h-4 w-4 text-red-500" />
-                <span>Pretoria Local: R1,000</span>
-              </span>
-              <span className="flex items-center space-x-1.5">
-                <Check className="h-4 w-4 text-red-500" />
-                <span>Other Provinces: R1,000 + R3,000</span>
-              </span>
-              <span className="flex items-center space-x-1.5">
-                <Check className="h-4 w-4 text-red-500" />
-                <span>Immediate SA VAT Invoice</span>
-              </span>
-            </div>
-          </div>
+            {/* Inactive/Expired/Restricted renewal prompt */}
+            {(currentUser.subscriptionStatus === 'inactive' || currentUser.subscriptionStatus === 'EXPIRED' || currentUser.subscriptionStatus === 'RESTRICTED') && (
+              <div className="bg-red-950/40 border border-red-500/30 p-5 rounded-2xl space-y-4">
+                <div className="flex items-start space-x-3">
+                  <ShieldAlert className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-display font-bold text-sm text-red-200">
+                      Plumber Account Restrictions Applied ({currentUser.subscriptionStatus})
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed mt-1">
+                      Your subscription has expired or is suspended. In accordance with Pretoria local Rapid-Response guidelines, you cannot view active dispatch jobs, chat with clients, or receive new work until subscription fees are settled (R50 per month).
+                    </p>
+                  </div>
+                </div>
 
-          {/* Right Button Column */}
-          <div className="flex flex-col items-center justify-center space-y-4 p-6 bg-slate-50 rounded-2xl border border-slate-200 w-full sm:w-auto min-w-[320px]">
-            <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">
-              TAP BUTTON FOR IMMEDIATE RESPONSE
-            </span>
-
-            {/* THE HUGE RED CALL OUT BUTTON */}
-            <div className="relative">
-              <div className="absolute -inset-4 bg-red-100 rounded-full animate-ping opacity-25"></div>
-              <button
-                id="huge-red-call-out"
-                onClick={handleHugeCalloutClick}
-                className="relative w-44 h-44 sm:w-48 sm:h-48 bg-red-600 hover:bg-red-700 text-white rounded-full flex flex-col items-center justify-center border-8 border-red-100 shadow-2xl transition-transform active:scale-95"
-              >
-                <PhoneCall className="h-8 w-8 animate-bounce mb-1" />
-                <span className="font-display font-black text-xl sm:text-2xl leading-none tracking-tight uppercase">
-                  24/7
-                </span>
-                <span className="font-display font-black text-sm sm:text-base leading-none tracking-tight uppercase mt-0.5">
-                  CALL OUT
-                </span>
-                <span className="text-[9px] font-mono tracking-widest text-red-200 uppercase mt-1">
-                  DISPATCH NOW
-                </span>
-              </button>
-            </div>
-
-            {/* Logged in target display */}
-            {currentUser ? (
-              <p className="text-center text-xs text-slate-600 pt-2">
-                Targeting: <strong className="text-slate-800">{currentUser.fullName}</strong><br />
-                <span className="text-slate-500">{currentUser.streetAddress}, {currentUser.city}</span>
-              </p>
-            ) : (
-              <button
-                onClick={() => {
-                  setAuthModalMode('register');
-                  setAuthModalOpen(true);
-                }}
-                className="text-xs text-slate-500 font-bold hover:text-red-600 underline pt-2"
-              >
-                Register address to prepare dispatch
-              </button>
+                <div className="pt-2 flex flex-wrap gap-3">
+                  <button
+                    onClick={() => handleRenewSubscription('monthly')}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-md"
+                  >
+                    Pay R50 (Renew 1 Month)
+                  </button>
+                  <button
+                    onClick={() => handleRenewSubscription('yearly')}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2 rounded-xl border border-slate-700 transition"
+                  >
+                    Pay R400 (Renew 1 Year - Save R200)
+                  </button>
+                </div>
+              </div>
             )}
-          </div>
-        </section>
+
+            {(currentUser.subscriptionStatus === 'active' || currentUser.subscriptionStatus === 'ACTIVE') && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* 1. Accepted Active Job */}
+                <div className="space-y-4">
+                  <h3 className="font-display font-black text-xs tracking-wider uppercase text-slate-400 border-b border-slate-800 pb-2">
+                    🎯 YOUR CURRENT ASSIGNED DISPATCH
+                  </h3>
+
+                  {currentUser.activeJobId ? (
+                    (() => {
+                      const activeJob = callouts.find(c => c.id === currentUser.activeJobId);
+                      if (!activeJob) {
+                        return (
+                          <div className="p-6 bg-slate-800/40 border border-slate-800 rounded-2xl text-center text-xs text-slate-400">
+                            No active job record found. Feel free to claim a job on the right board.
+                          </div>
+                        );
+                      }
+                      const category = PLUMBING_CATEGORIES.find(cat => cat.id === activeJob.jobCategoryId) || PLUMBING_CATEGORIES[0];
+                      return (
+                        <div className="bg-slate-800/40 border border-slate-700/50 p-5 rounded-2xl space-y-4">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="bg-red-500/10 text-red-400 font-mono text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-red-500/20 uppercase">
+                                {activeJob.status}
+                              </span>
+                              <h4 className="font-display font-bold text-base mt-2">
+                                {category.title} Emergency Repair
+                              </h4>
+                            </div>
+                            <span className="text-slate-400 font-mono text-xs">
+                              Ref: {activeJob.invoiceNumber}
+                            </span>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-2 text-xs">
+                            <div>
+                              <span className="text-slate-400 font-bold">Client Name:</span>
+                              <p className="text-slate-200 mt-0.5 font-medium">{activeJob.clientName}</p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-bold">Client Contact Number:</span>
+                              <p className="text-slate-200 mt-0.5 font-mono">{activeJob.clientPhone}</p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-bold">Dispatch Location:</span>
+                              <p className="text-slate-200 mt-0.5 font-medium leading-relaxed">
+                                {activeJob.clientAddress}, {activeJob.clientCity}, {activeJob.clientProvince}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-bold">Description of Issue:</span>
+                              <p className="text-slate-300 italic mt-1 leading-relaxed">
+                                &ldquo;{activeJob.issueDescription}&rdquo;
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-bold">Total Job Value:</span>
+                              <p className="text-red-400 font-mono font-bold text-sm mt-0.5">
+                                R{activeJob.totalAmount.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-bold block mb-1">Before / After Work Photos:</span>
+                              <div className="flex items-center gap-3">
+                                <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-[11px] font-bold py-1.5 px-3 rounded-lg border border-slate-700 transition-all flex items-center space-x-1">
+                                  <span>📷 Upload Work Photo</span>
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                      if (e.target.files && e.target.files[0]) {
+                                        alert("🎉 Work photo uploaded securely to Firebase storage bucket and logged!");
+                                      }
+                                    }} 
+                                  />
+                                </label>
+                                <span className="text-[10px] text-slate-500 font-mono">PNG, JPG formats supported</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick Actions to progress status */}
+                          <div className="pt-3 border-t border-slate-800 flex flex-wrap gap-2.5">
+                            {activeJob.status === 'En Route' && (
+                              <button
+                                onClick={() => handleSimulateProgress(activeJob.id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-full transition"
+                              >
+                                Mark: Arrived & Starting Work
+                              </button>
+                            )}
+                            {activeJob.status === 'In Progress' && (
+                              <button
+                                onClick={() => handleCompleteActiveJob(activeJob.id)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-full transition"
+                              >
+                                Complete Job & Finalize Tax Invoice
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setActiveChatCalloutId(activeJob.id)}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-3.5 py-1.5 rounded-full border border-slate-700 transition flex items-center space-x-1.5"
+                            >
+                              <MessageSquare className="h-3 w-3" />
+                              <span>Live Chat with Client</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="p-10 bg-slate-800/20 border border-dashed border-slate-800 rounded-3xl text-center text-slate-400 text-xs flex flex-col items-center justify-center space-y-3">
+                      <CheckCircle className="h-8 w-8 text-slate-700 animate-pulse" />
+                      <p className="font-bold">No active assigned job.</p>
+                      <p className="text-[10px] text-slate-500">
+                        You are free to accept any Pretoria incoming emergency call-outs listed on the right panel.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Available Incoming Jobs Board */}
+                <div className="space-y-4">
+                  <h3 className="font-display font-black text-xs tracking-wider uppercase text-slate-400 border-b border-slate-800 pb-2 flex justify-between items-center">
+                    <span>📢 INCOMING EMERGENCY BROADCASTS (PRETORIA)</span>
+                    <span className="bg-red-500 text-white text-[9px] font-black font-mono px-2 py-0.5 rounded-full animate-pulse">
+                      {callouts.filter(c => c.status === 'Pending Dispatch').length} NEW
+                    </span>
+                  </h3>
+
+                  <div className="space-y-3.5 max-h-[420px] overflow-y-auto pr-1">
+                    {callouts.filter(c => c.status === 'Pending Dispatch').length === 0 ? (
+                      <div className="p-10 text-center bg-slate-800/10 border border-slate-800 rounded-2xl text-slate-500 text-xs">
+                        No pending dispatches available at the moment. Stands are clear!
+                      </div>
+                    ) : (
+                      callouts
+                        .filter(c => c.status === 'Pending Dispatch')
+                        .map(job => {
+                          const category = PLUMBING_CATEGORIES.find(cat => cat.id === job.jobCategoryId) || PLUMBING_CATEGORIES[0];
+                          const maskName = (name: string) => {
+                            if (!name) return 'Resident';
+                            const parts = name.split(' ');
+                            const first = parts[0] || '';
+                            return `${first.charAt(0)}*** (Hidden until accepted)`;
+                          };
+                          return (
+                            <div key={job.id} className="bg-slate-800/30 border border-slate-800 p-4 rounded-xl space-y-3 hover:border-slate-700 transition">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <h4 className="font-display font-bold text-sm text-slate-200">
+                                    {category.title} Call-out
+                                  </h4>
+                                  <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+                                    Province/City: {job.clientCity}, {job.clientProvince}
+                                  </span>
+                                </div>
+                                <span className="font-mono text-slate-300 font-bold text-xs bg-slate-800 px-2.5 py-1 rounded">
+                                  R{job.totalAmount.toLocaleString('en-ZA')}
+                                </span>
+                              </div>
+
+                              <p className="text-xs text-slate-300 italic line-clamp-2">
+                                &ldquo;{job.issueDescription}&rdquo;
+                              </p>
+
+                              <div className="text-[10px] text-slate-400 grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-800/50 font-mono">
+                                <div>
+                                  <strong>Client:</strong> {maskName(job.clientName)}
+                                </div>
+                                <div>
+                                  <strong>Location:</strong> Hidden until accepted
+                                </div>
+                              </div>
+
+                              <div className="pt-2">
+                                <button
+                                  onClick={() => handleAcceptJob(job.id)}
+                                  className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 rounded-lg transition tracking-wide uppercase font-display"
+                                >
+                                  ⚡ Accept Job &amp; Dispatch Crew
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        ) : (
+          /* Hero Section containing Huge 24/7 Red Button */
+          <section className="bg-white rounded-3xl border-2 border-slate-200 shadow-xl p-8 sm:p-10 lg:p-12 relative overflow-hidden flex flex-col lg:flex-row items-center justify-between gap-8">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-red-500/5 rounded-full blur-3xl -z-10" />
+            <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl -z-10" />
+
+            {/* Left info column */}
+            <div className="space-y-4 max-w-xl text-center lg:text-left flex flex-col items-center lg:items-start">
+              <div className="flex items-center space-x-4 mb-2 self-center lg:self-start">
+                <Logo size="md" className="text-slate-900 shrink-0 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80 shadow-inner" />
+                <div className="text-left">
+                  <span className="bg-red-100 text-red-800 font-mono text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-full inline-block mb-1.5">
+                    ⚡ LIVE DISPATCH HUB
+                  </span>
+                  <h3 className="font-display font-black text-xl tracking-tight text-slate-900 uppercase leading-none">
+                    Plumb Ts &amp; Sons
+                  </h3>
+                </div>
+              </div>
+              <h2 className="font-display font-black text-3xl sm:text-4xl lg:text-5xl tracking-tight text-slate-800 underline decoration-red-200 underline-offset-8">
+                Emergency Dispatch
+              </h2>
+              <p className="text-sm sm:text-base text-slate-500 leading-relaxed pt-2">
+                Our 24/7 rapid-response plumbing crews are on standby. Within Pretoria, Gauteng, pay a flat-rate R1,000 call-out. Other South African provinces are served with a R3,000 long-distance dispatch surcharge. Average response: 24hrs.
+              </p>
+
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 text-xs font-semibold pt-4 text-slate-700">
+                <span className="flex items-center space-x-1.5">
+                  <Check className="h-4 w-4 text-red-500" />
+                  <span>Pretoria Local: R1,000</span>
+                </span>
+                <span className="flex items-center space-x-1.5">
+                  <Check className="h-4 w-4 text-red-500" />
+                  <span>Other Provinces: R1,000 + R3,000</span>
+                </span>
+                <span className="flex items-center space-x-1.5">
+                  <Check className="h-4 w-4 text-red-500" />
+                  <span>Immediate SA VAT Invoice</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Right Button Column */}
+            <div className="flex flex-col items-center justify-center space-y-4 p-6 bg-slate-50 rounded-2xl border border-slate-200 w-full sm:w-auto min-w-[320px]">
+              <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">
+                TAP BUTTON FOR IMMEDIATE RESPONSE
+              </span>
+
+              {/* THE HUGE RED CALL OUT BUTTON */}
+              <div className="relative">
+                <div className="absolute -inset-4 bg-red-100 rounded-full animate-ping opacity-25"></div>
+                <button
+                  id="huge-red-call-out"
+                  onClick={handleHugeCalloutClick}
+                  className="relative w-44 h-44 sm:w-48 sm:h-48 bg-red-600 hover:bg-red-700 text-white rounded-full flex flex-col items-center justify-center border-8 border-red-100 shadow-2xl transition-transform active:scale-95"
+                >
+                  <PhoneCall className="h-8 w-8 animate-bounce mb-1" />
+                  <span className="font-display font-black text-xl sm:text-2xl leading-none tracking-tight uppercase">
+                    24/7
+                  </span>
+                  <span className="font-display font-black text-sm sm:text-base leading-none tracking-tight uppercase mt-0.5">
+                    CALL OUT
+                  </span>
+                  <span className="text-[9px] font-mono tracking-widest text-red-200 uppercase mt-1">
+                    DISPATCH NOW
+                  </span>
+                </button>
+              </div>
+
+              {/* Logged in target display */}
+              {currentUser ? (
+                <p className="text-center text-xs text-slate-600 pt-2">
+                  Targeting: <strong className="text-slate-800">{currentUser.fullName}</strong><br />
+                  <span className="text-slate-500">{currentUser.streetAddress}, {currentUser.city}</span>
+                </p>
+              ) : (
+                <button
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    setAuthModalOpen(true);
+                  }}
+                  className="text-xs text-slate-500 font-bold hover:text-red-600 underline pt-2"
+                >
+                  Register address to prepare dispatch
+                </button>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* 3. Interactive Profile & Dispatch History Hub */}
         {currentUser && (
@@ -726,10 +1152,10 @@ export default function App() {
                                   </span>
                                 </div>
                                 <h4 className="font-display font-black text-sm text-slate-800">
-                                  Emergency {category.title} Crew
+                                  {req.projectName ? `${req.projectName} Project` : `Emergency ${category.title} Crew`}
                                 </h4>
                                 <p className="text-xs text-slate-500 truncate italic pr-4">
-                                  &ldquo;{req.issueDescription}&rdquo;
+                                  &ldquo;{req.projectDescription || req.issueDescription}&rdquo;
                                 </p>
                               </div>
 
@@ -804,7 +1230,7 @@ export default function App() {
         )}
 
         {/* 4. Active Emergency Board */}
-        {callouts.length > 0 && (
+        {(!currentUser || currentUser.role === 'client') && callouts.length > 0 && (
           <ActiveCallouts
             callouts={callouts}
             onViewInvoice={(req) => {

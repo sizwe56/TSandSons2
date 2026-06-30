@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Phone, X, MessageSquare, Wrench, CheckCheck } from 'lucide-react';
+import { subscribeChatMessages, sendChatMessage } from '../lib/firebase';
 
 interface ChatMessage {
   id: string;
@@ -8,6 +9,7 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   read: boolean;
+  createdAt?: number;
 }
 
 interface Plumber {
@@ -43,25 +45,33 @@ export default function PlumberChat({ calloutId, onClose }: PlumberChatProps) {
   const plumber = getAssignedPlumber(calloutId);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Load chat messages
+  // Load chat messages in real-time
   useEffect(() => {
-    const savedMessages = localStorage.getItem(`plumb_chat_${calloutId}`);
-    if (savedMessages) {
-      setMessages(JSON.parse(savedMessages));
-    } else {
-      // Seed a friendly greeting from the plumber
-      const initial: ChatMessage[] = [
-        {
+    let isSubscribed = true;
+
+    const unsubscribe = subscribeChatMessages(calloutId, (loadedMessages) => {
+      if (!isSubscribed) return;
+
+      if (loadedMessages.length === 0) {
+        // Seed friendly greeting from plumber to Firestore if no messages exist yet
+        const welcomeMsg: ChatMessage = {
           id: 'welcome-1',
           sender: 'plumber',
           text: `Hi! I've been dispatched to your property. I am preparing my gear right now. Please let me know if you have any quick questions or details about the issue.`,
           timestamp: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
-          read: true
-        }
-      ];
-      setMessages(initial);
-      localStorage.setItem(`plumb_chat_${calloutId}`, JSON.stringify(initial));
-    }
+          read: true,
+          createdAt: Date.now()
+        };
+        sendChatMessage(calloutId, welcomeMsg);
+      } else {
+        setMessages(loadedMessages);
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      unsubscribe();
+    };
   }, [calloutId]);
 
   // Scroll to bottom
@@ -69,12 +79,7 @@ export default function PlumberChat({ calloutId, onClose }: PlumberChatProps) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const saveMessages = (newMessages: ChatMessage[]) => {
-    setMessages(newMessages);
-    localStorage.setItem(`plumb_chat_${calloutId}`, JSON.stringify(newMessages));
-  };
-
-  const handleSendMessage = (text: string) => {
+  const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     const userMsg: ChatMessage = {
@@ -82,16 +87,16 @@ export default function PlumberChat({ calloutId, onClose }: PlumberChatProps) {
       sender: 'user',
       text: text.trim(),
       timestamp: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
-      read: true
+      read: true,
+      createdAt: Date.now()
     };
 
-    const updated = [...messages, userMsg];
-    saveMessages(updated);
     setInputText('');
+    await sendChatMessage(calloutId, userMsg);
 
     // Trigger plumber smart simulated response
     setIsTyping(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       setIsTyping(false);
       const plumberReplyText = getSmartReply(text);
       const plumberMsg: ChatMessage = {
@@ -99,9 +104,10 @@ export default function PlumberChat({ calloutId, onClose }: PlumberChatProps) {
         sender: 'plumber',
         text: plumberReplyText,
         timestamp: new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }),
-        read: true
+        read: true,
+        createdAt: Date.now() + 1
       };
-      saveMessages([...updated, plumberMsg]);
+      await sendChatMessage(calloutId, plumberMsg);
     }, 1800);
   };
 

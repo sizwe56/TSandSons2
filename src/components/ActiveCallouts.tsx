@@ -27,21 +27,24 @@ export default function ActiveCallouts({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Pending Dispatch': return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'En Route': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'In Progress': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-      case 'Completed': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-      case 'Cancelled': return 'bg-rose-100 text-rose-800 border-rose-200';
+      case 'OPEN': return 'bg-amber-100 text-amber-800 border-amber-200';
+      case 'ACCEPTED': return 'bg-sky-100 text-sky-800 border-sky-200';
+      case 'EN_ROUTE': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'IN_PROGRESS': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+      case 'COMPLETED': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      case 'CLOSED': return 'bg-slate-100 text-slate-800 border-slate-200';
       default: return 'bg-slate-100 text-slate-800 border-slate-200';
     }
   };
 
   const getStatusStepIndex = (status: string) => {
     switch (status) {
-      case 'Pending Dispatch': return 0;
-      case 'En Route': return 1;
-      case 'In Progress': return 2;
-      case 'Completed': return 3;
+      case 'OPEN': return 0;
+      case 'ACCEPTED': return 1;
+      case 'EN_ROUTE': return 2;
+      case 'IN_PROGRESS': return 3;
+      case 'COMPLETED': return 4;
+      case 'CLOSED': return 5;
       default: return -1;
     }
   };
@@ -59,7 +62,7 @@ export default function ActiveCallouts({
         </div>
         <span className="bg-red-100 text-red-800 font-mono text-xs font-bold px-2.5 py-1 rounded-full flex items-center space-x-1">
           <span className="h-2 w-2 bg-red-600 rounded-full animate-ping mr-1" />
-          <span>{callouts.filter(c => c.status !== 'Completed' && c.status !== 'Cancelled').length} Active</span>
+          <span>{callouts.filter(c => c.status !== 'CLOSED').length} Active</span>
         </span>
       </div>
 
@@ -95,7 +98,7 @@ export default function ActiveCallouts({
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="font-display font-extrabold text-lg text-slate-900">
-                      Emergency {category.title} Crew
+                      {request.projectName ? `${request.projectName} Project` : `Emergency ${category.title} Crew`}
                     </h3>
                     <span className="font-mono text-xs text-slate-500 font-semibold bg-slate-100 px-2 py-1 rounded">
                       Ref: {request.invoiceNumber}
@@ -103,7 +106,7 @@ export default function ActiveCallouts({
                   </div>
 
                   <p className="text-sm text-slate-600 italic line-clamp-2">
-                    &ldquo;{request.issueDescription}&rdquo;
+                    &ldquo;{request.projectDescription || request.issueDescription}&rdquo;
                   </p>
 
                   <div className="grid grid-cols-2 gap-4 text-xs pt-2">
@@ -122,7 +125,7 @@ export default function ActiveCallouts({
                 </div>
 
                 {/* Progress Timeline (Steppers) */}
-                {request.status !== 'Cancelled' && (
+                {request.status !== 'CLOSED' && (
                   <div className="relative pt-4 pb-2">
                     <div className="absolute top-7 left-5 right-5 sm:left-10 sm:right-10 h-0.5 bg-slate-200 -z-10" />
                     
@@ -130,16 +133,17 @@ export default function ActiveCallouts({
                     {currentStep > 0 && (
                       <div 
                         className="absolute top-7 left-5 sm:left-10 h-0.5 bg-red-600 -z-10 transition-all duration-500" 
-                        style={{ width: `${(currentStep / 3) * 100}%`, maxWidth: 'calc(100% - 40px)' }}
+                        style={{ width: `${(currentStep / 4) * 100}%`, maxWidth: 'calc(100% - 40px)' }}
                       />
                     )}
 
                     <div className="flex justify-between text-center">
                       {[
-                        { label: 'Dispatched', desc: 'Crew Assigned', icon: Clock },
-                        { label: 'En Route', desc: 'Driving to Property', icon: Truck },
-                        { label: 'In Progress', desc: 'Repairing Issue', icon: RefreshCw },
-                        { label: 'Completed', desc: 'Task Finalized', icon: ShieldCheck }
+                        { label: 'OPEN', desc: 'Dispatch Board', icon: Clock },
+                        { label: 'ACCEPTED', desc: 'Crew Assigned', icon: ShieldCheck },
+                        { label: 'EN_ROUTE', desc: 'Driving to Property', icon: Truck },
+                        { label: 'IN_PROGRESS', desc: 'Repairing Issue', icon: RefreshCw },
+                        { label: 'COMPLETED', desc: 'Completed Work', icon: CheckCircle2 }
                       ].map((step, idx) => {
                         const StepIcon = step.icon;
                         const isPast = idx < currentStep;
@@ -154,7 +158,7 @@ export default function ActiveCallouts({
                                 'bg-white border-slate-300 text-slate-400'
                               }`}
                             >
-                              <StepIcon className={`h-3.5 w-3.5 ${isCurrent && idx === 2 ? 'animate-spin' : ''}`} />
+                              <StepIcon className={`h-3.5 w-3.5 ${isCurrent && idx === 3 ? 'animate-spin' : ''}`} />
                             </div>
                             <span className={`text-[10px] font-bold mt-1.5 leading-none ${isCurrent ? 'text-red-600' : 'text-slate-700'}`}>
                               {step.label}
@@ -173,7 +177,7 @@ export default function ActiveCallouts({
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
                   <div className="flex flex-wrap gap-2">
                     {/* Simulator Button */}
-                    {request.status !== 'Completed' && request.status !== 'Cancelled' && (
+                    {request.status !== 'CLOSED' && (
                       <button
                         onClick={() => onSimulateProgress(request.id)}
                         className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-full text-xs flex items-center space-x-1.5 transition"
@@ -185,7 +189,7 @@ export default function ActiveCallouts({
                     )}
 
                     {/* Chat with Plumber Button */}
-                    {request.status !== 'Completed' && request.status !== 'Cancelled' && (
+                    {request.status !== 'CLOSED' && (
                       <button
                         onClick={() => onOpenChat && onOpenChat(request.id)}
                         className="bg-red-50 hover:bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-full text-xs flex items-center space-x-1.5 border border-red-100 transition"
@@ -197,7 +201,7 @@ export default function ActiveCallouts({
                     )}
 
                     {/* Cancel Button */}
-                    {request.status === 'Pending Dispatch' && (
+                    {request.status === 'OPEN' && (
                       <button
                         onClick={() => onCancelCallout(request.id)}
                         className="text-red-600 hover:bg-red-50 font-bold px-3 py-1.5 rounded-full text-xs flex items-center space-x-1.5 border border-red-100 transition"

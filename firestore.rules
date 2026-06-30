@@ -1,8 +1,264 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // 1. Global Catch-All Deny
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function getCalloutData(calloutId) {
+      return get(/databases/$(database)/documents/callouts/$(calloutId)).data;
+    }
+
+    // Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.role is string && (data.role == 'client' || data.role == 'plumber' || data.role == 'crew') &&
+             data.name is string && data.name.size() <= 128 &&
+             (!('city' in data) || (data.city is string && data.city.size() <= 128)) &&
+             (!('province' in data) || (data.province is string && data.province.size() <= 128)) &&
+             (!('popiaConsent' in data) || (data.popiaConsent is bool)) &&
+             (!('plumberId' in data) || (data.plumberId is string && data.plumberId.matches('^PLM-[0-9]{6}$'))) &&
+             (!('isPaid' in data) || (data.isPaid is bool)) &&
+             (!('subscriptionExpiry' in data) || (data.subscriptionExpiry is number)) &&
+             (!('subscriptionPlan' in data) || (data.subscriptionPlan is string && data.subscriptionPlan.size() <= 64)) &&
+             (!('monthlyPaid' in data) || (data.monthlyPaid is bool)) &&
+             (!('paidUntil' in data) || (data.paidUntil is string && data.paidUntil.size() <= 128)) &&
+             (!('subscriptionStatus' in data) || (data.subscriptionStatus == 'ACTIVE' || data.subscriptionStatus == 'EXPIRED' || data.subscriptionStatus == 'RESTRICTED' || data.subscriptionStatus == 'active' || data.subscriptionStatus == 'inactive')) &&
+             (!('isMaster' in data) || (data.isMaster is bool)) &&
+             (!('masterPlumberId' in data) || (data.masterPlumberId is string && data.masterPlumberId.size() <= 128)) &&
+             (!('crewMemberIds' in data) || (data.crewMemberIds is list && data.crewMemberIds.size() <= 5)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 2048)) &&
+             (!('experienceYears' in data) || (data.experienceYears is number)) &&
+             (!('profilePhoto' in data) || (data.profilePhoto is string && data.profilePhoto.size() <= 1024)) &&
+             (!('workPhotos' in data) || (data.workPhotos is list && data.workPhotos.size() <= 20)) &&
+             (!('rating' in data) || (data.rating is number)) &&
+             (!('reviewsCount' in data) || (data.reviewsCount is number)) &&
+             (!('activeJob' in data) || (data.activeJob is bool)) &&
+             (!('activeJobId' in data) || (data.activeJobId is string || data.activeJobId == null));
+    }
+
+    function isValidPrivateUserInfo(data) {
+      return data.phone is string && data.phone.size() <= 32 &&
+             (!('streetAddress' in data) || (data.streetAddress is string && data.streetAddress.size() <= 256)) &&
+             (!('hidePhoneFromPublic' in data) || (data.hidePhoneFromPublic is bool)) &&
+             (!('hideAddressFromPublic' in data) || (data.hideAddressFromPublic is bool));
+    }
+
+    function isValidCallout(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.jobCategoryId is string && data.jobCategoryId.size() <= 128 &&
+             data.projectName is string && data.projectName.size() <= 256 &&
+             data.status is string && (
+               data.status == 'OPEN' || 
+               data.status == 'ACCEPTED' || 
+               data.status == 'EN_ROUTE' || 
+               data.status == 'IN_PROGRESS' || 
+               data.status == 'COMPLETED' || 
+               data.status == 'CLOSED'
+             ) &&
+             data.isEmergency is bool &&
+             (!('termsAccepted' in data) || (data.termsAccepted is bool)) &&
+             (!('pdfUrl' in data) || (data.pdfUrl is string && data.pdfUrl.size() <= 1024)) &&
+             (!('responsePeriod' in data) || (data.responsePeriod is string && data.responsePeriod.size() <= 128)) &&
+             (!('assignedPlumberId' in data) || (data.assignedPlumberId is string || data.assignedPlumberId == null)) &&
+             (!('baseFee' in data) || (data.baseFee is number)) &&
+             (!('createdAt' in data) || (data.createdAt is string)) &&
+             (!('projectDescription' in data) || (data.projectDescription is string && data.projectDescription.size() <= 2048)) &&
+             (!('issueDescription' in data) || (data.issueDescription is string && data.issueDescription.size() <= 2048)) &&
+             (!('bannerPhoto' in data) || (data.bannerPhoto is string && data.bannerPhoto.size() <= 1024)) &&
+             (!('beforePhoto' in data) || (data.beforePhoto is string && data.beforePhoto.size() <= 1024)) &&
+             (!('progressPhoto' in data) || (data.progressPhoto is string && data.progressPhoto.size() <= 1024)) &&
+             (!('completedPhoto' in data) || (data.completedPhoto is string && data.completedPhoto.size() <= 1024)) &&
+             (!('isPrivateProject' in data) || (data.isPrivateProject is bool)) &&
+             (!('photoPortfolioApproved' in data) || (data.photoPortfolioApproved is bool)) &&
+             (!('reviewRating' in data) || (data.reviewRating is number)) &&
+             (!('reviewComment' in data) || (data.reviewComment is string && data.reviewComment.size() <= 2048)) &&
+             (!('signedOffAt' in data) || (data.signedOffAt is string));
+    }
+
+    function isValidCalloutPIIDetails(data) {
+      return data.clientName is string && data.clientName.size() <= 128 &&
+             data.clientPhone is string && data.clientPhone.size() <= 32 &&
+             data.clientAddress is string && data.clientAddress.size() <= 256 &&
+             (!('clientEmail' in data) || (data.clientEmail is string && data.clientEmail.size() <= 256));
+    }
+
+    function isValidChatMessage(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.sender is string && (data.sender == 'user' || data.sender == 'plumber') &&
+             data.text is string && data.text.size() <= 1024 &&
+             (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 64)) &&
+             (!('read' in data) || (data.read is bool)) &&
+             data.createdAt is number;
+    }
+
+    // 2. User Profiles Collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && (
+        request.auth.uid == userId ||
+        (existing().role == 'plumber' && existing().isPaid == true && (existing().subscriptionStatus == 'ACTIVE' || existing().subscriptionStatus == 'active'))
+      );
+
+      // Clients list query (only filters for plumbers in Pretoria/available plumbers)
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUserProfile(incoming()) && (
+        // Prevent self-assigned subscription or plumber IDs on first registration
+        !('isPaid' in incoming()) || incoming().isPaid == false
+      ) && (
+        !('plumberId' in incoming())
+      );
+
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidUserProfile(incoming()) && (
+        // Protect system-only/subscription-only fields from client tampering unless performing valid self-billing updates
+        incoming().role == existing().role &&
+        (!('plumberId' in incoming()) || incoming().plumberId == existing().plumberId) &&
+        (!('isMaster' in incoming()) || incoming().isMaster == existing().isMaster) &&
+        (!('masterPlumberId' in incoming()) || incoming().masterPlumberId == existing().masterPlumberId) && (
+          // General self update
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'city', 'province', 'bio', 'experienceYears', 'profilePhoto', 
+            'workPhotos', 'popiaConsent', 'activeJobId', 'crewMemberIds', 'subscriptionPlan', 
+            'subscriptionStatus', 'monthlyPaid', 'paidUntil', 'isPaid', 'activeJob'
+          ])
+        ) && (
+          // Plumbers must have paid subscriptions to upload photos, display bios or add crew
+          existing().role != 'plumber' || existing().isPaid == true
+        ) && (
+          // Crew member limit check (up to 5 crew members for master plumber)
+          !('crewMemberIds' in incoming()) || (
+            existing().isMaster == true && incoming().crewMemberIds.size() <= 5
+          )
+        )
+      );
+    }
+
+    // 3. User Private Contact Information (POPIA compliance)
+    match /users/{userId}/private/info {
+      allow read, write: if isSignedIn() && request.auth.uid == userId && isValidPrivateUserInfo(incoming());
+    }
+
+    // 4. Job Postings (Callouts) Collection
+    match /callouts/{calloutId} {
+      // Clients see their own jobs; Paid, active plumbers can view and browse all jobs
+      allow get: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (getUserData(request.auth.uid).role == 'plumber' && getUserData(request.auth.uid).isPaid == true && (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active')) ||
+        (getUserData(request.auth.uid).role == 'crew' && getUserData(request.auth.uid).isPaid == true && (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active'))
+      );
+
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (getUserData(request.auth.uid).role == 'plumber' && getUserData(request.auth.uid).isPaid == true && (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active')) ||
+        (getUserData(request.auth.uid).role == 'crew' && getUserData(request.auth.uid).isPaid == true && (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active'))
+      );
+
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid && isValidCallout(incoming()) && (
+        // Mandate T&C and Instant response period for Emergency jobs
+        (incoming().isEmergency == false && incoming().responsePeriod == '48-hours') ||
+        (incoming().isEmergency == true && incoming().termsAccepted == true && incoming().responsePeriod == 'Instant')
+      );
+
+      allow update: if isSignedIn() && isValidCallout(incoming()) && (
+        // Terminal State Locking (Closed jobs can never be updated)
+        existing().status != 'CLOSED'
+      ) && (
+        // Action 1: Accept Job (Active Plumber)
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['assignedPlumberId', 'status']) &&
+          incoming().status == 'ACCEPTED' &&
+          existing().status == 'OPEN' &&
+          (getUserData(request.auth.uid).role == 'plumber' || getUserData(request.auth.uid).role == 'crew') &&
+          getUserData(request.auth.uid).isPaid == true &&
+          (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active') &&
+          (
+            // Single Active Job Constraint: must not have active job
+            !('activeJobId' in getUserData(request.auth.uid)) || 
+            getUserData(request.auth.uid).activeJobId == null
+          ) &&
+          (
+            !('activeJob' in getUserData(request.auth.uid)) || 
+            getUserData(request.auth.uid).activeJob == false
+          )
+        ) ||
+        // Action 2: Update Status / Upload Photos (By Assigned Plumber/Crew)
+        (
+          request.auth.uid == existing().assignedPlumberId &&
+          incoming().diff(existing()).affectedKeys().hasAny(['status', 'bannerPhoto', 'beforePhoto', 'progressPhoto', 'completedPhoto']) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'bannerPhoto', 'beforePhoto', 'progressPhoto', 'completedPhoto']) &&
+          (
+            incoming().status == 'EN_ROUTE' || 
+            incoming().status == 'IN_PROGRESS' || 
+            incoming().status == 'COMPLETED'
+          )
+        ) ||
+        // Action 3: Client Sign-Off & Close with rating/review/survey
+        (
+          request.auth.uid == existing().userId &&
+          incoming().status == 'CLOSED' &&
+          existing().status == 'COMPLETED' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewRating', 'reviewComment', 'surveyFeedback', 'photoPortfolioApproved', 'signedOffAt'])
+        )
+      );
+    }
+
+    // 5. Client PII Details Subcollection (Hidden until accepted)
+    match /callouts/{calloutId}/pii/details {
+      allow read: if isSignedIn() && (
+        request.auth.uid == getCalloutData(calloutId).userId || (
+          request.auth.uid == getCalloutData(calloutId).assignedPlumberId &&
+          getCalloutData(calloutId).status != 'OPEN'
+        )
+      );
+
+      allow write: if isSignedIn() && request.auth.uid == getCalloutData(calloutId).userId && isValidCalloutPIIDetails(incoming());
+    }
+
+    // 6. Real-time Chat Messaging
+    match /callouts/{calloutId}/messages/{messageId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == getCalloutData(calloutId).userId || (
+          request.auth.uid == getCalloutData(calloutId).assignedPlumberId &&
+          getUserData(request.auth.uid).role == 'plumber' &&
+          getUserData(request.auth.uid).isPaid == true &&
+          (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active')
+        )
+      );
+
+      allow create: if isSignedIn() && isValidChatMessage(incoming()) && (
+        (request.auth.uid == getCalloutData(calloutId).userId && incoming().sender == 'user') || (
+          request.auth.uid == getCalloutData(calloutId).assignedPlumberId &&
+          getUserData(request.auth.uid).role == 'plumber' &&
+          getUserData(request.auth.uid).isPaid == true &&
+          (getUserData(request.auth.uid).subscriptionStatus == 'ACTIVE' || getUserData(request.auth.uid).subscriptionStatus == 'active') &&
+          incoming().sender == 'plumber'
+        )
+      );
     }
   }
 }
